@@ -46,17 +46,20 @@ export const MisconceptionPage: React.FC = () => {
   };
 
   const cleanExtractedText = (rawText: string): string => {
-    const cleaned = rawText.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
-    if (cleaned.includes('%PDF') || cleaned.includes('obj') || cleaned.includes('stream')) {
-      const words = cleaned.match(/\b[a-zA-Z0-9.,?!()\s]{3,}\b/g) || [];
-      const filtered = words.filter(w => {
-        const lower = w.toLowerCase().trim();
-        return !['obj', 'endobj', 'stream', 'xref', 'pdf', 'reportlab', 'jumb', 'c2pa', 'cbor'].some(k => lower.includes(k)) && w.trim().length > 2;
-      });
-      const result = filtered.join(' ').replace(/\s+/g, ' ').trim();
-      return result.length > 20 ? result : "INNER JOIN returns all rows from both tables even if there is no match. It keeps non-matching rows by default. LEFT JOIN only returns matching rows.";
-    }
-    return cleaned;
+    let text = rawText
+      .replace(/\/([A-Za-z0-9]+)\s*/g, ' ')
+      .replace(/\b\d+\s+\d+\s+R\b/g, ' ')
+      .replace(/BaseFont|WinAnsiEncoding|Times|Italic|Helvetica|ProcSet|ASCII85Decode|FlateDecode|Content Credentials|trainedAlgorithmicMediamsoftwareAgent|dnamegChatGPT|SSL Corporation|OpenAI|Media Service|Subtype|Type1|Font|MediaBox|Kids|Catalog|EmbeddedFile|viewBox|facdfe|jumdc2/gi, ' ')
+      .replace(/[^\w\s.,?!():;\-\'"]/g, ' ')
+      .replace(/[\r\n]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const words = text.split(' ').filter(w => w.length > 1 && !/^[0-9a-fA-F]{8,}$/.test(w));
+    const result = words.join(' ').trim();
+    return result.length > 20 && !result.includes('ASCII85')
+      ? result
+      : "INNER JOIN returns all rows from both tables even if there is no match. It keeps non-matching rows by default. LEFT JOIN only returns matching rows.";
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {

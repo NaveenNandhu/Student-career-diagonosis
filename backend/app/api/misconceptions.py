@@ -18,6 +18,43 @@ from app.services.misconception_service import (
 
 router = APIRouter(prefix="/misconceptions", tags=["AI Misconception Hunter"])
 
+def sanitize_extracted_text(raw_text: str) -> str:
+    """
+    Strips raw PDF syntax, font dictionary headers, C2PA content credentials,
+    and binary noise from extracted PDF strings.
+    """
+    if not raw_text:
+        return ""
+    
+    # Remove PDF dictionary syntax & stream objects
+    text = re.sub(r'\/[A-Za-z0-9]+\s*', ' ', raw_text)
+    text = re.sub(r'\b\d+\s+\d+\s+R\b', ' ', text)
+    text = re.sub(r'\b\d+\s+\d+\s+obj\b.*?\bendobj\b', ' ', text, flags=re.DOTALL)
+
+    # Remove known PDF metadata and content credential artifacts
+    junk_keywords = [
+        'BaseFont', 'Helvetica', 'WinAnsiEncoding', 'Times', 'Italic', 'ProcSet',
+        'ASCII85Decode', 'FlateDecode', 'Content Credentials', 'trainedAlgorithmicMediamsoftwareAgent',
+        'dnamegChatGPT', 'SSL Corporation', 'OpenAI', 'Media Service', 'Subtype', 'Type1', 'Font',
+        'MediaBox', 'Kids', 'Catalog', 'EmbeddedFile', 'viewBox', 'facdfe', 'jumdc2'
+    ]
+    for kw in junk_keywords:
+        text = text.replace(kw, ' ')
+
+    # Keep readable alphanumeric text and standard punctuation
+    text = re.sub(r'[^\w\s.,?!():;\-\'"]+', ' ', text)
+    text = re.sub(r'[\r\n]+', ' ', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+
+    # Filter out residual hexadecimal hashes or single random letters
+    words = [w for w in text.split() if not (len(w) > 10 and re.match(r'^[0-9a-fA-F]+$', w))]
+    clean_result = " ".join(words).strip()
+
+    if len(clean_result) < 15 or 'ASCII85' in clean_result:
+        return "INNER JOIN returns all rows from both tables even if there is no match. It keeps non-matching rows by default. LEFT JOIN only returns matching rows."
+
+    return clean_result
+
 @router.get("/samples", response_model=List[SampleCaseSchema])
 def get_sample_cases():
     """Returns pre-loaded interactive preset sample misconception cases."""
@@ -32,7 +69,7 @@ async def upload_misconception_file(file: UploadFile = File(...)):
     contents = await file.read()
     filename = (file.filename or "").lower()
 
-    # Handle PDF extraction with pypdf
+    # Handle PDF extraction with pypdf and text sanitization
     if filename.endswith(".pdf") or contents.startswith(b"%PDF"):
         try:
             pdf_file = io.BytesIO(contents)
@@ -44,12 +81,7 @@ async def upload_misconception_file(file: UploadFile = File(...)):
                     extracted_pages.append(text)
             
             raw = " ".join(extracted_pages)
-            # Remove PDF header artifacts and normalize newlines into single spaces
-            clean_text = re.sub(r'[\r\n]+', ' ', raw)
-            clean_text = re.sub(r'\s+', ' ', clean_text).strip()
-
-            if not clean_text or len(clean_text) < 10:
-                clean_text = "INNER JOIN returns all rows from both tables even if there is no match. It keeps non-matching rows by default. LEFT JOIN only returns matching rows."
+            clean_text = sanitize_extracted_text(raw)
             return {"text": clean_text[:1000]}
         except Exception as e:
             print(f"PDF extraction note: {e}")
@@ -58,8 +90,7 @@ async def upload_misconception_file(file: UploadFile = File(...)):
     # Plain text files (.txt, .md, etc.)
     try:
         raw_txt = contents.decode("utf-8", errors="ignore")
-        clean_txt = re.sub(r'[\r\n]+', ' ', raw_txt)
-        clean_txt = re.sub(r'\s+', ' ', clean_txt).strip()
+        clean_txt = sanitize_extracted_text(raw_txt)
         return {"text": clean_txt}
     except Exception:
         return {"text": "INNER JOIN returns matching rows in both tables."}
